@@ -155,76 +155,74 @@ class Workbench:
             chunked_upload (bool): Enable/disable chunk upload.
         """
         file_size = os.path.getsize(path)
-        size_limit = 8 * 1024 * 1024  # 8MB in bytes. Based on the default value of post_max_size in php.ini
-        # Prepare parameters
+        size_limit = 8 * 1024 * 1024  # 8MB
+
         filename = os.path.basename(path)
         filename_base64 = base64.b64encode(filename.encode()).decode("utf-8")
         scan_code_base64 = base64.b64encode(scan_code.encode()).decode("utf-8")
 
-        if chunked_upload and (file_size > size_limit):
-            print(f"Uploading {filename} using 'Transfer-encoding: chunks' due to file size {file_size}.")
-            # Use chunked upload for files bigger than size_limit
-            # First delete possible existing files because chunk uploading works by appending existing file on disk.
-            self.remove_uploaded_content(filename, scan_code)
-            print("Uploading using Transfer-encoding: chunked...")
+        if chunked_upload and file_size > size_limit:
+            # … your existing chunked-upload logic …
             headers = {
                 "FOSSID-SCAN-CODE": scan_code_base64,
                 "FOSSID-FILE-NAME": filename_base64,
-                'Transfer-Encoding': 'chunked',
-                'Content-Type': 'application/octet-stream'
+                "Transfer-Encoding": "chunked",
+                "Content-Type": "application/octet-stream",
             }
             try:
                 with open(path, "rb") as file:
-                    for chunk in self._read_in_chunks(file, 5242880):
-                        # Upload each chunk
+                    for chunk in self._read_in_chunks(file, 5_242_880):
                         self._chunked_upload_request(scan_code, headers, chunk)
             except IOError:
-                # Error opening file
                 print(f"Failed to upload files to the scan {scan_code}.")
                 print(traceback.print_exc())
                 sys.exit(1)
-            print("Finished uploading.")
+            print("Finished uploading (chunked).")
+
         else:
-            # Regular upload, no chunk upload
+            # Regular upload, no chunked encoding
             headers = {
                 "FOSSID-SCAN-CODE": scan_code_base64,
-                "FOSSID-FILE-NAME": filename_base64
+                "FOSSID-FILE-NAME": filename_base64,
             }
-            print("Uploading...")
+            print("Uploading…")
             try:
                 with open(path, "rb") as file:
+                    # === SWITCH TO HTTPBasicAuth ===
                     resp = requests.post(
                         self.api_url,
                         headers=headers,
                         data=file,
-                        auth=(self.api_user, self.api_token),
+                        auth=HTTPBasicAuth(self.api_user, self.api_token),
                         timeout=1800,
                     )
-                    # Retrieve the HTTP status code
+
+                    # === DUMP OUTGOING HEADERS FOR DEBUGGING ===
+                    print(">>>> OUTGOING REQUEST HEADERS:")
+                    for key, val in resp.request.headers.items():
+                        print(f"    {key}: {val}")
+
                     status_code = resp.status_code
                     print(f"HTTP Status Code: {status_code}")
 
-                    # Check if the request was successful (status code 200)
                     if status_code == 200:
-                        # Parse the JSON response
                         try:
                             resp.json()
-                        except:
+                        except Exception:
                             print(f"Failed to decode json {resp.text}")
                             print(traceback.print_exc())
                             sys.exit(1)
                     else:
                         print(f"Request failed with status code {status_code}")
-                        reason = resp.reason
-                        print(f"Reason: {reason}")
-                        response_text = resp.text
-                        print(f"Response Text: {response_text}")
+                        print(f"Reason: {resp.reason}")
+                        print(f"Response Text: {resp.text}")
                         sys.exit(1)
+
             except IOError:
-                # Error opening file
                 print(f"Failed to upload files to the scan {scan_code}.")
                 print(traceback.print_exc())
                 sys.exit(1)
+
             print("Finished uploading.")
 
     def _delete_existing_scan(self, scan_code: str):
